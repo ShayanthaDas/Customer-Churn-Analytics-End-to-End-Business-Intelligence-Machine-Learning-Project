@@ -1,0 +1,229 @@
+import pandas as pd
+import numpy as np
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from scipy import stats
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, roc_auc_score
+
+from xgboost import XGBClassifier
+import joblib
+
+df = pd.read_csv("/content/Customer-Churn.csv")
+df.head()
+
+print(df.shape)
+print(df.info())
+print(df.isnull().sum())
+print(df.duplicated().sum())
+
+df['TotalCharges'] = pd.to_numeric(df['TotalCharges'], errors='coerce')
+df['TotalCharges'].fillna(df['TotalCharges'].median(), inplace=True)
+
+df['Churn'] = df['Churn'].map({'Yes': 1, 'No': 0})
+
+df.drop('customerID', axis=1, inplace=True)
+
+df['TenureGroup'] = pd.cut(
+    df['tenure'],
+    bins=[0, 12, 24, 48, 60, 100],
+    labels=['0-1yr', '1-2yr', '2-4yr', '4-5yr', '5yr+']
+)
+
+df['SpendingLevel'] = pd.qcut(df['MonthlyCharges'], 4,
+                                labels=['Low', 'Medium', 'High', 'Very High'])
+
+df['CustomerValue'] = df['tenure'] * df['MonthlyCharges']
+
+df['RiskScore'] = (
+    (df['tenure'] < 12).astype(int) +
+    (df['MonthlyCharges'] > df['MonthlyCharges'].median()).astype(int)
+)
+
+df['Churn'].value_counts(normalize=True) * 100
+
+sns.countplot(x='Churn', data=df)
+plt.title("Churn Distribution")
+plt.show()
+
+plt.figure(figsize=(6,4))
+df.groupby('Contract')['Churn'].mean().plot(kind='bar')
+plt.title("Churn Rate by Contract Type")
+plt.ylabel("Churn Rate")
+plt.show()
+
+df.groupby('InternetService')['Churn'].mean().plot(kind='bar')
+plt.title("Churn Rate by Internet Service")
+plt.show()
+
+sns.histplot(df['tenure'], bins=30, kde=True)
+plt.title("Tenure Distribution")
+plt.show()
+
+sns.boxplot(x='Churn', y='MonthlyCharges', data=df)
+plt.title("Monthly Charges vs Churn")
+plt.show()
+
+plt.figure(figsize=(10,6))
+sns.heatmap(df.corr(numeric_only=True), annot=False, cmap='coolwarm')
+plt.title("Correlation Heatmap")
+plt.show()
+
+categorical_cols = df.select_dtypes(include=['object']).columns
+
+le = LabelEncoder()
+
+for col in categorical_cols:
+    df[col] = le.fit_transform(df[col])
+
+df.to_csv("clean_churn_dataset.csv", index=False)
+print("Cleaned dataset saved successfully!")
+
+X = df.drop('Churn', axis=1)
+y = df['Churn']
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+model = XGBClassifier(
+    n_estimators=300,
+    learning_rate=0.05,
+    max_depth=6,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    eval_metric='logloss',
+    random_state=42,
+    enable_categorical=True
+)
+
+model.fit(X_train, y_train)
+
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+
+print("Accuracy:", accuracy_score(y_test, y_pred))
+
+print(classification_report(y_test, y_pred))
+
+cm = confusion_matrix(y_test, y_pred)
+
+sns.heatmap(cm, annot=True, fmt='d')
+plt.title("Confusion Matrix")
+plt.show()
+
+print("ROC-AUC:", roc_auc_score(y_test, y_prob))
+
+importance = model.feature_importances_
+
+feat_imp = pd.DataFrame({
+    'Feature': X.columns,
+    'Importance': importance
+}).sort_values(by='Importance', ascending=False)
+
+plt.figure(figsize=(10,6))
+sns.barplot(x='Importance', y='Feature', data=feat_imp)
+plt.title("Feature Importance")
+plt.show()
+
+joblib.dump(model, "churn_xgb_model.pkl")
+print("Model saved successfully!")
+
+model = joblib.load("churn_xgb_model.pkl")
+
+np.random.seed(42)
+
+df['Group'] = np.random.choice(['Control', 'Treatment'], size=len(df))
+
+df['Churn_Experiment'] = df['Churn']
+
+treatment_mask = df['Group'] == 'Treatment'
+df.loc[treatment_mask, 'Churn_Experiment'] = (
+    df.loc[treatment_mask, 'Churn'] *
+    np.random.uniform(0.7, 0.9, size=treatment_mask.sum())
+).round()
+
+df.groupby('Group')['Churn_Experiment'].mean()
+
+control = df[df['Group'] == 'Control']['Churn_Experiment']
+treatment = df[df['Group'] == 'Treatment']['Churn_Experiment']
+
+t_stat, p_value = stats.ttest_ind(control, treatment)
+
+print("t-stat:", t_stat)
+print("p-value:", p_value)
+
+if p_value < 0.05:
+    print("Significant difference found")
+else:
+    print("No significant difference")
+
+sns.barplot(x='Group', y='Churn_Experiment', data=df)
+plt.title("A/B Test Result")
+plt.show()
+
+X_test
+model
+
+# Predict class
+predictions = model.predict(X_test)
+
+# Predict probability
+probabilities = model.predict_proba(X_test)[:,1]
+
+import pandas as pd
+
+pred_label = pd.Series(predictions).map({
+    0: "No Churn",
+    1: "Churn"
+})
+
+def risk_category(prob):
+
+    if prob < 0.30:
+        return "Low"
+
+    elif prob < 0.70:
+        return "Medium"
+
+    else:
+        return "High"
+
+results = pd.DataFrame({
+
+    'customerID': X_test.index,
+
+    'Prediction': pred_label,
+
+    'Probability': probabilities
+
+})
+
+results['Risk Score'] = results['Probability'].apply(risk_category)
+
+results['Probability'] = (
+    results['Probability'] * 100
+).round(2)
+
+results = results.sort_values(
+    by='Probability',
+    ascending=False
+)
+
+top20 = results.head(20)
+
+print(top20)
+
+results.to_csv(
+    'customer_churn_predictions.csv',
+    index=False
+)
+
+print("File saved successfully")
