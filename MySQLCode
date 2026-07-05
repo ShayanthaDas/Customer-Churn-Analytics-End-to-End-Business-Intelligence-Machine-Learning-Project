@@ -1,0 +1,276 @@
+DROP DATABASE IF EXISTS customer_churn_db;
+CREATE DATABASE customer_churn_db;
+USE customer_churn_db;
+CREATE TABLE churn_stage (
+	customerID VARCHAR(255),
+    gender VARCHAR(255),
+    SeniorCitizen VARCHAR(255),
+    Partner VARCHAR(255),
+    Dependents VARCHAR(255),
+    tenure VARCHAR(255),
+    PhoneService VARCHAR(255),
+    MultipleLines VARCHAR(255),
+    InternetService VARCHAR(255),
+    OnlineSecurity VARCHAR(255),
+    OnlineBackup VARCHAR(255),
+    DeviceProtection VARCHAR(255),
+    TechSupport VARCHAR(255),
+    StreamingTV VARCHAR(255),
+    StreamingMovies VARCHAR(255),
+    Contract VARCHAR(255),
+    PaperlessBilling VARCHAR(255),
+    PaymentMethod VARCHAR(255),
+    MonthlyCharges VARCHAR(255),
+    TotalCharges VARCHAR(255),
+    Churn VARCHAR(255)
+);
+SHOW VARIABLES LIKE 'secure_file_priv';
+LOAD DATA INFILE
+'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/customer_churn.csv'
+INTO TABLE churn_stage
+FIELDS TERMINATED BY ','
+OPTIONALLY ENCLOSED BY '"'
+LINES TERMINATED BY '\r\n'
+IGNORE 1 ROWS;
+SELECT *
+FROM churn_stage
+LIMIT 10;
+SELECT COUNT(*) AS total_customers
+FROM churn_stage;
+SELECT COUNT(*) AS churn_customers
+FROM churn_stage
+WHERE Churn='Yes';
+SELECT 
+ROUND(
+COUNT(CASE WHEN Churn='Yes' THEN 1 END)
+*100.0/COUNT(*),
+2
+) AS churn_rate
+FROM churn_stage;
+SELECT 
+ROUND(AVG(MonthlyCharges),2) 
+AS avg_monthly_charge
+FROM churn_stage;
+SELECT 
+ROUND(AVG(tenure),2) 
+AS avg_tenure
+FROM churn_stage;
+SELECT 
+Contract,
+COUNT(*) AS customers,
+ROUND(
+AVG(CASE WHEN Churn='Yes' THEN 1 END)*100,
+2
+) AS churn_rate
+FROM churn_stage
+GROUP BY Contract
+ORDER BY churn_rate DESC;
+SELECT 
+Gender,
+COUNT(*) AS customers,
+ROUND(
+AVG(CASE WHEN Churn='Yes' THEN 1 END)*100,
+2
+) AS churn_rate
+FROM churn_stage
+GROUP BY gender;
+SELECT 
+InternetService,
+COUNT(*) AS customers,
+ROUND(
+AVG(CASE WHEN Churn='Yes' THEN 1 END)*100,
+2
+) AS churn_rate
+FROM churn_stage
+GROUP BY InternetService;
+SELECT 
+PaymentMethod,
+COUNT(*) AS customers,
+ROUND(
+AVG(CASE WHEN Churn='Yes' THEN 1 END)*100,
+2
+) AS churn_rate
+FROM churn_stage
+GROUP BY PaymentMethod
+ORDER BY churn_rate DESC;
+SELECT 
+customerID,
+tenure,
+MonthlyCharges,
+ROUND(tenure * MonthlyCharges,2) 
+AS customer_value
+FROM churn_stage;
+CREATE VIEW customer_value_view AS
+
+SELECT 
+customerID,
+tenure,
+MonthlyCharges,
+ROUND(tenure * MonthlyCharges,2) 
+AS customer_value,
+Churn
+FROM churn_stage;
+SELECT *
+FROM customer_value_view
+ORDER BY customer_value DESC
+LIMIT 20;
+SELECT 
+customerID,
+tenure,
+
+CASE
+WHEN tenure <= 12 THEN '0-1 Year'
+WHEN tenure <= 24 THEN '1-2 Years'
+WHEN tenure <= 48 THEN '2-4 Years'
+WHEN tenure <= 60 THEN '4-5 Years'
+ELSE '5+ Years'
+END AS tenure_group
+
+FROM churn_stage;
+SELECT 
+
+CASE
+WHEN tenure <= 12 THEN '0-1 Year'
+WHEN tenure <= 24 THEN '1-2 Years'
+WHEN tenure <= 48 THEN '2-4 Years'
+WHEN tenure <= 60 THEN '4-5 Years'
+ELSE '5+ Years'
+END AS tenure_group,
+
+ROUND(
+AVG(CASE WHEN Churn='Yes' THEN 1 END)*100,
+2
+) AS churn_rate
+
+FROM churn_stage
+
+GROUP BY tenure_group
+ORDER BY churn_rate DESC;
+SELECT
+customerID,
+MonthlyCharges,
+
+RANK() OVER(
+ORDER BY MonthlyCharges DESC
+) AS spending_rank
+
+FROM churn_stage;
+SELECT *
+
+FROM(
+
+SELECT
+customerID,
+MonthlyCharges,
+
+ROW_NUMBER() OVER(
+ORDER BY MonthlyCharges DESC
+) AS rn
+
+FROM churn_stage
+
+) x
+
+WHERE rn <= 10;
+SELECT
+customerID,
+MonthlyCharges,
+
+SUM(MonthlyCharges)
+OVER(
+ORDER BY customerID
+) AS running_revenue
+
+FROM churn_stage;
+WITH churn_summary AS
+
+(
+SELECT
+Contract,
+
+ROUND(
+AVG(CASE WHEN Churn='Yes'
+THEN 1 ELSE 0 END)*100,
+2
+) AS churn_rate
+
+FROM churn_stage
+GROUP BY Contract
+)
+
+SELECT *
+FROM churn_summary
+ORDER BY churn_rate DESC;
+DROP PROCEDURE IF EXISTS GetChurnRate;
+DELIMITER //
+
+CREATE PROCEDURE GetChurnRate()
+BEGIN
+    SELECT
+        ROUND(
+            AVG(
+                CASE
+                    WHEN Churn = 'Yes' THEN 1
+                    ELSE 0
+                END
+            ) * 100,
+        2) AS churn_rate
+    FROM churn_stage;
+END//
+
+DELIMITER ;
+CALL GetChurnRate();
+DELIMITER //
+
+CREATE FUNCTION customer_value(
+tenure_month INT,
+monthly_charge DECIMAL(10,2)
+)
+
+RETURNS DECIMAL(12,2)
+
+DETERMINISTIC
+
+BEGIN
+
+RETURN tenure_month * monthly_charge;
+
+END //
+
+DELIMITER ;
+SELECT
+customerID,
+customer_value(
+tenure,
+MonthlyCharges
+) AS customer_value
+FROM churn_stage;
+SELECT
+customerID,
+
+(
+CASE WHEN tenure < 12 THEN 1 ELSE 0 END +
+CASE WHEN MonthlyCharges > 70 THEN 1 ELSE 0 END +
+CASE WHEN Contract='Month-to-month' THEN 1 ELSE 0 END
+)
+
+AS risk_score
+
+FROM churn_stage;
+SELECT
+customerID,
+tenure,
+MonthlyCharges,
+Contract,
+
+(
+CASE WHEN tenure < 12 THEN 1 ELSE 0 END +
+CASE WHEN MonthlyCharges > 70 THEN 1 ELSE 0 END +
+CASE WHEN Contract='Month-to-month' THEN 1 ELSE 0 END
+)
+
+AS risk_score
+
+FROM churn_stage
+
+ORDER BY risk_score DESC;
