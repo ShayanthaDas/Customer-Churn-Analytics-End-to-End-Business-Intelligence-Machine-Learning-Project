@@ -1,0 +1,269 @@
+CREATE DATABASE customer_churn_db;
+CREATE TABLE churn_customers (
+customerID VARCHAR(50),
+gender VARCHAR(20),
+SeniorCitizen INTEGER,
+Partner VARCHAR(10),
+Dependents VARCHAR(10),
+tenure INTEGER,
+PhoneService VARCHAR(10),
+MultipleLines VARCHAR(30),
+InternetService VARCHAR(30),
+OnlineSecurity VARCHAR(30),
+OnlineBackup VARCHAR(30),
+DeviceProtection VARCHAR(30),
+TechSupport VARCHAR(30),
+StreamingTV VARCHAR(30),
+StreamingMovies VARCHAR(30),
+Contract VARCHAR(30),
+PaperlessBilling VARCHAR(10),
+PaymentMethod VARCHAR(100),
+MonthlyCharges NUMERIC(10,2),
+TotalCharges NUMERIC(12,2),
+Churn VARCHAR(10)
+);
+COPY churn_customers
+FROM 'C:/ProgramData/MySQL/MySQL Server 8.0/Uploads/customer_churn.csv'
+WITH (
+	FORMAT csv, 
+	HEADER true,
+	NULL ' '
+);
+SELECT COUNT(*) AS total_customers
+FROM churn_customers;
+SELECT COUNT(*) 
+FROM churn_customers
+WHERE Churn='Yes';
+SELECT
+ROUND(
+100.0 *
+SUM(CASE WHEN Churn='Yes' THEN 1 ELSE 0 END)
+/
+COUNT(*),
+2
+)
+AS churn_rate
+FROM churn_customers;
+SELECT
+customerID,
+MonthlyCharges,
+tenure,
+ROUND(
+MonthlyCharges * tenure,
+2
+)
+AS customer_value
+FROM churn_customers;
+CREATE VIEW customer_analytics_view AS
+SELECT
+customerID,
+gender,
+Contract,
+MonthlyCharges,
+tenure,
+ROUND(
+MonthlyCharges * tenure,
+2
+)
+AS customer_value,
+Churn
+FROM churn_customers;
+CREATE MATERIALIZED VIEW churn_summary_mv AS
+SELECT
+Contract,
+COUNT(*) AS customers,
+ROUND(
+AVG(
+CASE WHEN Churn='Yes' 
+THEN 1 
+ELSE 0 
+END
+)*100,
+2
+)
+AS churn_rate
+FROM churn_customers
+GROUP BY Contract;
+REFRESH MATERIALIZED VIEW churn_summary_mv;
+SELECT
+customerID,
+MonthlyCharges,
+RANK()
+OVER(
+ORDER BY MonthlyCharges DESC
+)
+AS spending_rank
+FROM churn_customers;
+SELECT
+customerID,
+MonthlyCharges,
+DENSE_RANK()
+OVER(
+ORDER BY MonthlyCharges DESC
+)
+AS dense_rank
+FROM churn_customers;
+SELECT
+customerID,
+MonthlyCharges,
+PERCENT_RANK()
+OVER(
+ORDER BY MonthlyCharges 
+)
+AS percentile
+FROM churn_customers;
+SELECT
+customerID,
+MonthlyCharges,
+SUM(MonthlyCharges)
+OVER(
+ORDER BY customerID
+)
+AS cumulative_revenue
+FROM churn_customers;
+SELECT
+customerID,
+CASE
+WHEN tenure <= 12 THEN 'New'
+WHEN tenure <= 24 THEN 'Growing'
+WHEN tenure <= 48 THEN 'Loyal'
+ELSE 'VIP'
+END
+AS customer_segment
+FROM churn_customers;
+SELECT
+customerID,
+MonthlyCharges,
+NTILE(4)
+OVER(
+ORDER BY MonthlyCharges
+)
+AS spending_quartile
+FROM churn_customers;
+SELECT
+CASE
+WHEN tenure <= 12 THEN '0-12'
+WHEN tenure <= 24 THEN '13-24'
+WHEN tenure <= 48 THEN '25-48'
+ELSE '49+'
+END
+AS cohort,
+COUNT(*) AS customers,
+ROUND(
+AVG(
+CASE WHEN Churn='Yes' 
+THEN 1 ELSE 0 END
+)*100,
+2
+)
+AS churn_rate
+FROM churn_customers
+GROUP BY cohort;
+SELECT AVG(MonthlyCharges)
+FROM churn_customers;
+SELECT 
+PERCENTILE_CONT(0.5)
+WITHIN GROUP
+(ORDER BY MonthlyCharges)
+FROM churn_customers;
+SELECT 
+PERCENTILE_CONT(0.90)
+WITHIN GROUP
+(ORDER BY MonthlyCharges)
+FROM churn_customers;
+SELECT 
+STDDEV(MonthlyCharges)
+FROM churn_customers;
+SELECT
+CORR(
+MonthlyCharges,
+TotalCharges
+)
+AS correlation
+FROM churn_customers;
+SELECT
+customerID,
+(
+CASE WHEN tenure < 12 THEN 1 ELSE 0 END +
+CASE WHEN MonthlyCharges > 70 THEN 1 ELSE 0 END +
+CASE WHEN Contract='Month-to-month' 
+THEN 1 ELSE 0 END 
+)
+AS risk_score
+FROM churn_customers
+ORDER BY risk_score DESC;
+CREATE OR REPLACE FUNCTION customer_value(
+tenure_month INTEGER,
+monthly_charge NUMERIC
+)
+RETURNS NUMERIC
+AS $$
+BEGIN
+RETURN tenure_month * monthly_charge;
+END;
+$$ LANGUAGE plpgsql;
+SELECT
+customerID,
+customer_value(
+tenure,
+MonthlyCharges
+)
+FROM churn_customers;
+SELECT
+customerID,
+json_build_object(
+'Contract', Contract,
+'MonthlyCharges', MonthlyCharges,
+'Tenure', tenure
+)
+AS customer_json
+FROM churn_customers;
+SELECT 
+    ROW_NUMBER() OVER () AS num
+FROM churn_customers;
+SELECT 
+    num + 1
+FROM (
+    SELECT ROW_NUMBER() OVER () AS num
+    FROM churn_customers
+) t;
+WITH RECURSIVE numbers AS (
+SELECT 1 AS num
+UNION ALL
+SELECT num + 1
+FROM numbers
+WHERE num < 10
+)
+SELECT *
+FROM numbers;
+SELECT
+customerID,
+MonthlyCharges * tenure
+AS customer_value
+FROM churn_customers
+ORDER BY customer_value DESC
+LIMIT 10;
+SELECT
+COUNT(*) AS total_customers,
+SUM(
+CASE WHEN Churn='Yes' 
+THEN 1 ELSE 0 END
+)
+AS churn_customers,
+ROUND(
+AVG(
+MonthlyCharges),
+2
+)
+AS avg_monthly_charge,
+ROUND(
+AVG(tenure),
+2
+)
+AS avg_tenure,
+ROUND(
+AVG(MonthlyCharges * tenure),
+2
+)
+AS avg_customer_value
+FROM churn_customers;
